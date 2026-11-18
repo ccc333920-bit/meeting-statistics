@@ -1,0 +1,90 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>館務會議統計自動填報系統｜測試版</title><style>body{font-family:system-ui,'Noto Sans TC',sans-serif;background:#f5f7fb;color:#243349;margin:0}header{background:#173656;color:white;padding:25px max(22px,calc((100% - 1100px)/2))}h1{font-size:24px;margin:0 0 7px}main{max-width:1100px;margin:25px auto;padding:0 18px}section{background:white;border:1px solid #dde5ee;border-radius:12px;padding:22px;margin:18px 0}h2{font-size:19px;margin-top:0}label{display:block;margin:12px 0;font-weight:600}input[type=file],textarea,input[type=number]{display:block;width:100%;box-sizing:border-box;margin-top:7px;padding:9px;border:1px solid #aab8c8;border-radius:6px}textarea{min-height:115px;line-height:1.6}button{background:#1766a4;color:white;border:0;border-radius:7px;padding:12px 18px;cursor:pointer;margin:5px 6px 5px 0}button:disabled{background:#9ba9b6;cursor:not-allowed}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid #e1e7ed;padding:8px;text-align:right}th:first-child,td:first-child{text-align:left}.muted{color:#617386}.warn{color:#a34115}.ok{color:#18734d}.err{color:#a21b31}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f5f7fb;padding:12px;border-radius:6px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}.small{font-size:13px}.hidden{display:none}</style></head><body><header><h1>館務會議統計自動填報系統</h1><div>V0.6 GitHub Pages 部署候選版｜指定欄位更新・來源核對・文字人工確認・保留原始 Word</div></header><main><section><h2>1｜上傳每月三份檔案</h2><div class="grid"><label>國資圖統計總報表（.xlsx）<input id="flow" type="file" accept=".xlsx"></label><label>閱覽科統計報表（.xls 或 .xlsx）<input id="service" type="file" accept=".xls,.xlsx"></label><label>本月 Word 範本（.docx）<input id="word" type="file" accept=".docx"></label></div><label>統計年度（民國）<input type="number" id="year" value="115" min="100" max="150"></label><label>統計月份（報表實績月份）<input type="number" id="month" value="10" min="1" max="12"></label><p class="muted small">檔案只在本機瀏覽器內處理，不上傳至本工具的伺服器。首次開啟需連線載入 Excel 解析程式庫；原始檔案在瀏覽器本機處理，不會提交至 GitHub。</p><button id="analyze">讀取並驗證來源</button><div id="status" role="status"></div></section><section><h2>2｜逐筆核對結果</h2><div id="results" class="muted">尚未分析。未驗證通過不允許產出。</div></section><section><h2>3｜檢討分析草稿（人工確認）</h2><p class="muted">系統依數據產生量化草稿。活動原因與服務案件分類須由承辦人確認，不會自動編造。</p><label>入館人次檢討分析<textarea id="entry"></textarea></label><label>借閱人次、借閱冊次檢討分析<textarea id="loan"></textarea></label><label>參考諮詢檢討分析<textarea id="consult"></textarea></label><label>參考諮詢執行效益<textarea id="benefit"></textarea></label><label><input type="checkbox" id="approved"> 我已確認上述四段文字及數據，准予寫入本次 Word 範本</label><button id="export" disabled>產出 Word（.docx）</button><p class="small muted">僅處理四張流通統計表的入館／借閱三列、5F 四筆服務數據，以及指定的四段分析文字。其他內容不變。遇到無法辨識的表格或欄位，停止產出。</p></section><section><h2>版本與限制</h2><p class="small">本版為待正式驗收的 GitHub Pages 網頁部署候選程式，僅在瀏覽器本機處理資料；須通過實際瀏覽器 Excel 讀取與 Word 排版驗收後才能視為正式版。修正：精武欄 AB/AM 為「-」，不屬指定統計範圍，不會讀取或強制轉為0。修正：115年借閱資料從第6列（1月）開始，10月為第15列；114年借閱同期來源：上傳總表-流通統計的 Y/Z/AJ/AK 欄第38列起；115年來源依欄位標題與當月列檢查。Word 文字更新採指定段落定位；遇到範本結構變更則停止。</p></section></main><script>
+window.__xlsxReady = new Promise(resolve => {
+ const urls = ['https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js','https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js','https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js'];
+ let i=0; function next(){if(window.XLSX)return resolve(true);if(i===urls.length)return resolve(false);let s=document.createElement('script');s.src=urls[i++];s.onload=()=>resolve(!!window.XLSX);s.onerror=next;document.head.appendChild(s)}next();
+});
+</script><script src="./jszip.min.js"></script><script>
+const $=id=>document.getElementById(id),fmt=n=>Math.round(n).toLocaleString('en-US'), pct=(a,b)=>b===0?'N/A':((a-b)/b*100).toFixed(1)+'%', diff=(a,b)=>a-b;
+let payload=null;const required=['flow','service','word'];
+function fail(s){throw new Error(s)}function num(v,desc){if(typeof v==='number'&&Number.isFinite(v))return v;if(typeof v==='string'&&v.trim()&&Number.isFinite(Number(v.replace(/,/g,''))))return Number(v.replace(/,/g,''));fail(desc+' 非有效數字：'+String(v))}
+function val(ws,cell){return ws[cell]?.v}function nv(ws,cell){return num(val(ws,cell),cell)}function sum(ws,col,a,b){let z=0;for(let r=a;r<=b;r++)z+=nv(ws,col+r);return z}
+function getSheet(wb,name){const ws=wb.Sheets[name];if(!ws)fail('找不到工作表「'+name+'」');return ws}
+async function book(file){return XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:false})}
+function matchMonth(v,y,m){if(typeof v==='number')return Math.abs(v-(y+m/100))<0.00001;let s=String(v??'').trim();return s===`${y}.${String(m).padStart(2,'0')}`||s===`${y}.${m}`}
+function findMonth(ws,y,m,col='A',lo=1,hi=80){let rows=[];for(let r=lo;r<=hi;r++)if(matchMonth(val(ws,col+r),y,m))rows.push(r);if(rows.length!==1)fail(`${y}年${m}月來源列數不符：${rows.join(',')||'找不到'}`);return rows[0]}
+function checkMonthSequence(ws,y,m,col,lo,hi){let rows=[];for(let k=1;k<=m;k++)rows.push(findMonth(ws,y,k,col,lo,hi));if(rows.some((r,i)=>i&&r<=rows[i-1]))fail('來源月份排序異常');return rows}
+function totalAt(ws,col,rows){return rows.reduce((a,r)=>a+nv(ws,col+r),0)}
+function groupData(ws,m){ // 115年「上傳總表-流通統計」: row 6=1月, row 15=10月, row 18=合計
+ const r=5+m;
+ // Y-Z etc are summary columns; 115年 borrow: Y total main paper; AD/AE/AF are closed and e-book, so use explicit components only
+ // borrow counts: Y=總館紙本, Z=黎明, AA=中興, AB=精武(不納入), AC=總館微圖, AD=閉架限館內, AE=閉架外借
+ // borrower counts: AJ=總館紙本, AK=黎明, AL=中興, AM=精武(不納入), AN=微圖, AO=閉架限館內, AP=閉架外借
+ const groups={books:{main:['Y','AC','AD','AE'],all:['Y','AC','AD','AE','Z','AA']},people:{main:['AJ','AN','AO','AP'],all:['AJ','AN','AO','AP','AK','AL']}};
+ const out={};for(let [kind,g] of Object.entries(groups)){out[kind]={};for(let [scope,cols] of Object.entries(g)){let monthly=cols.reduce((n,c)=>n+nv(ws,c+r),0),cumulative=cols.reduce((n,c)=>n+sum(ws,c,6,r),0);out[kind][scope]={monthly,cumulative,components:cols.map(c=>`${c}${r}=${fmt(nv(ws,c+r))}`).join(' + ')}}}return out
+}
+function past(ws,m){const r=37+m;const cols={books:{main:'Z',all:'Y'},people:{main:'AK',all:'AJ'}};let o={};for(let [kind,g] of Object.entries(cols)){o[kind]={};for(let [scope,c] of Object.entries(g))o[kind][scope]={monthly:nv(ws,c+r),cumulative:sum(ws,c,38,r)}}return o}
+function dataRow(current,old){return {current,old,change:diff(current,old),rate:pct(current,old)}}
+function draw(p){let html='<table><thead><tr><th>指定項目</th><th>115年</th><th>114年</th><th>同期比較</th><th>成長率</th></tr></thead><tbody>';for(const [key,d] of Object.entries(p.rows))html+=`<tr><td>${key}</td><td>${fmt(d.current)}</td><td>${fmt(d.old)}</td><td>${fmt(d.change)}</td><td>${d.rate}</td></tr>`;html+='</tbody></table><p class="ok">已完成來源欄位與數值運算；請檢查數據及文字，並以正式檔案測試 Word 排版。</p>';html+='<details><summary>查看欄位與檢查紀錄</summary><pre>'+p.log.join('\n')+'</pre></details>';$('results').innerHTML=html}
+function sentence(name,a){return `${name}為${fmt(a.current)}，去年同期${fmt(a.old)}，${a.change>=0?'增加':'減少'}${fmt(Math.abs(a.change))}，${a.rate.startsWith('-')?'下降':'成長'}${a.rate.replace('-','')}。`}
+function drafts(p,m){const r=p.rows;$('entry').value=`${m}月總館入館人次${sentence('',r['總館入館・當月']).replace('為','為')}全館入館人次${sentence('',r['全館入館・當月'])}\n1至${m}月累計，總館入館人次${sentence('',r['總館入館・累計'])}全館入館人次${sentence('',r['全館入館・累計'])}\n入館變化可能受到開館天數、閱讀推廣活動及周邊服務據點等因素影響，尚待依實際活動及開館情形確認。後續將持續結合特色書展、親子閱讀及數位服務推廣，提升空間與館藏資源使用效益。`;
+ let a=r['總館借閱人次・當月'],b=r['全館借閱人次・當月'],c=r['總館借閱冊次・當月'],d=r['全館借閱冊次・當月'];let avg=(n,k)=>k? (n/k).toFixed(2):'無法計算';$('loan').value=`${m}月總館借閱人次${sentence('',a)}全館借閱人次${sentence('',b)}總館借閱冊次${sentence('',c)}全館借閱冊次${sentence('',d)}\n總館平均每借閱人次借閱冊數由去年同期${avg(c.old,a.old)}冊變為${avg(c.current,a.current)}冊，全館則由${avg(d.old,b.old)}冊變為${avg(d.current,b.current)}冊，顯示單次借閱量有所變化。\n1至${m}月累計，總館借閱人次${sentence('',r['總館借閱人次・累計'])}全館借閱人次${sentence('',r['全館借閱人次・累計'])}總館借閱冊次${sentence('',r['總館借閱冊次・累計'])}全館借閱冊次${sentence('',r['全館借閱冊次・累計'])}\n可能與借閱獎勵、主題書展及新書展示等活動有關，仍需比對當月實際活動紀錄。後續將持續透過館藏展示及閱讀推廣措施，觀察借閱人次與冊次變化。`;
+ $('consult').value=`${m}月份讀者意見共${fmt(p.service.opinions)}件。各類案件分布、主要問題及處理情形尚待承辦人依讀者意見紀錄補充確認，不以總件數推定分類。`;
+ $('benefit').value=`${m}月份提供電話諮詢${fmt(p.service.phone)}人次、現場諮詢${fmt(p.service.desk)}人次，受理讀者意見${fmt(p.service.opinions)}件、館際合作${fmt(p.service.ndds)}件。透過多元諮詢管道協助讀者使用館藏與相關服務，後續將依常見問題及實際案件內容檢視服務流程與改善措施。`}
+$('analyze').onclick=async()=>{payload=null;$('export').disabled=true;$('approved').checked=false;$('status').textContent='';try{
+ if(!window.XLSX)await window.__xlsxReady;if(!window.XLSX||!window.JSZip)fail('Excel 解析程式庫載入失敗：請確認網路是否允許連線至 cdnjs.cloudflare.com、jsdelivr.net 或 unpkg.com');for(let id of required)if(!$(id).files[0])fail('請上傳全部三份檔案');
+ let m=Number($('month').value),y=Number($('year').value);if(m<1||m>12||y!==115)fail('目前版本僅支援115年1–12月');
+ const [flow,svc]=await Promise.all([book($('flow').files[0]),book($('service').files[0])]);
+ let ws=getSheet(flow,'上傳總表-流通統計'),fs=getSheet(flow,'流通-總表'),five=getSheet(svc,'5F');
+ let currentRows=checkMonthSequence(ws,y,m,'A',6,17),currentRow=currentRows.at(-1),oldRows=Array.from({length:m},(_,i)=>38+i),priorRow=oldRows.at(-1);
+ if(currentRow!==m+5)fail('借閱當月列位置與既有報表不符');
+ // 114年借閱的彙整欄位：Y全館冊次、Z總館冊次、AJ全館人次、AK總館人次
+ let loan=groupData(ws,m),old=past(ws,m),rows={},log=[`115年借閱：上傳總表-流通統計第${currentRow}列，114年同期：第${priorRow}列`];
+ for(let scope of ['main','all'])for(let period of ['monthly','cumulative'])for(let kind of ['people','books']){let tag=scope==='main'?'總館':'全館',time=period==='monthly'?'當月':'累計';rows[`${tag}借閱${kind==='people'?'人次':'冊次'}・${time}`]=dataRow(loan[kind][scope][period],old[kind][scope][period]);}
+ // 入館：115年上傳總表 A列月份、B總館、F全館；114年流通-總表 A27起
+ let oldEntryRows=checkMonthSequence(fs,114,m,'A',27,38);
+ for(let [scope,col,oldCol] of [['main','B','C'],['all','F','F']]){let tag=scope==='main'?'總館':'全館',curr=nv(ws,col+currentRow),oldMonth=nv(fs,oldCol+oldEntryRows.at(-1)),currSum=totalAt(ws,col,currentRows),oldSum=totalAt(fs,oldCol,oldEntryRows);rows[`${tag}入館・當月`]=dataRow(curr,oldMonth);rows[`${tag}入館・累計`]=dataRow(currSum,oldSum)}
+ // 檢查來源累計區；只在年末月份為0時使用年度合計做交叉核對
+ if(m===10){for(let [c,key] of [['B','總館入館・累計'],['F','全館入館・累計']]){let total=nv(ws,c+'18');if(total!==rows[key].current)fail(`${c}18累計不一致：${total} vs ${rows[key].current}`)}}
+ // 5F 每月列：115年1月第5列，10月第14列；以對應列固定規則並驗證總計欄
+ let sr=m+4,service={phone:nv(five,'H'+sr),desk:nv(five,'I'+sr),opinions:nv(five,'M'+sr),ndds:nv(five,'S'+sr)};
+ if(nv(five,'J'+sr)+nv(five,'K'+sr)+nv(five,'L'+sr)!==service.opinions)fail('5F讀者意見小計與分類合計不符');
+ if(['P','Q','R'].reduce((a,c)=>a+nv(five,c+sr),nv(five,'O'+sr))!==service.ndds)fail('5F館際合作小計不一致');
+ log.push(`入館115年來源：上傳總表-流通統計 B/F，當月第${currentRow}列；114年：流通-總表 C/F，當月第${oldEntryRows.at(-1)}列`);
+ log.push(`借閱115年來源：Y/AC/AD/AE、Z/AA、AJ/AN/AO/AP、AK/AL；114年來源：Y/Z/AJ/AK，第38–${priorRow}列`);
+ log.push(`5F來源：H/I/M/S 第${sr}列；J+K+L=M、O+P+Q+R=S 已驗證`);
+ payload={rows,service,log,m,y,word:$('word').files[0]};draw(payload);drafts(payload,m);let zip=await JSZip.loadAsync(await payload.word.arrayBuffer());let doc=zip.file('word/document.xml');if(!doc)fail('Word缺少document.xml');patch(await doc.async('string'),{...payload,text:{entry:$('entry').value,loan:$('loan').value,consult:$('consult').value,benefit:$('benefit').value}});log.push('Word指定表格及段落定位預檢通過');$('status').innerHTML='<p class="ok">來源計算完成。請確認文字草稿，驗證Word結構後才允許下載。</p>';
+ }catch(e){$('status').innerHTML='<p class="err">已停止：'+String(e.message)+'</p>';$('results').textContent='來源驗證未通過。'}};
+$('approved').onchange=()=>{$('export').disabled=!($('approved').checked&&payload)};
+const W='http://schemas.openxmlformats.org/wordprocessingml/2006/main';const child=(n,tag)=>Array.from(n.childNodes).filter(x=>x.nodeType===1&&x.localName===tag);const all=(n,tag)=>Array.from(n.getElementsByTagNameNS(W,tag));const txt=n=>all(n,'t').map(x=>x.textContent).join('');
+function setText(el,s){let ts=all(el,'t');if(!ts.length)fail('目標段落沒有可更新文字');ts[0].textContent=s;for(let t of ts.slice(1))t.textContent=''}
+function setCell(tbl,row,col,s){let trs=child(tbl,'tr');if(!trs[row])fail('Word 表格缺少第'+row+'列');let tcs=child(trs[row],'tc');if(!tcs[col])fail('Word 表格缺少第'+col+'欄');let ps=all(tcs[col],'p');if(!ps.length)fail('Word 儲存格沒有段落');setText(ps[0],s)}
+function patch(xml,p){
+ let doc=new DOMParser().parseFromString(xml,'application/xml');if(doc.getElementsByTagName('parsererror').length)fail('Word XML解析失敗');
+ let tables=all(doc,'tbl'),candidate=tables.filter(t=>{let rows=child(t,'tr');return rows.length===8&&txt(t).includes('入館人次')&&txt(t).includes('借閱冊次')});
+ if(candidate.length!==4)fail('Word流通統計表數量異常：'+candidate.length+'（應為4）');
+ const expected=[['總館','當月'],['總館','累計'],['全館','當月'],['全館','累計']];
+ for(let i=0;i<4;i++){
+  let [scope,period]=expected[i],t=candidate[i],rows=child(t,'tr');
+  for(let [idx,metric] of [[2,'入館'],[5,'借閱人次'],[6,'借閱冊次']]){
+   if(!txt(rows[idx]).includes(metric==='入館'?'入館人次':metric))fail(`Word第${i+1}表第${idx+1}列標題不符`);
+   let d=p.rows[`${scope}${metric}・${period}`];if(!d)fail('缺少數據：'+scope+metric+period);
+   for(let [j,v] of [d.current,d.old,d.change,d.rate].entries())setCell(t,idx,j+2,typeof v==='number'?fmt(v):v)
+  }
+ }
+ let svc=tables.filter(t=>{let r=child(t,'tr');return r.length===6&&txt(t).includes('電話諮詢')&&txt(t).includes('館際合作')});
+ if(svc.length!==1)fail('Word參考諮詢表格定位失敗');
+ for(let [idx,key,label] of [[2,'phone','電話諮詢'],[3,'desk','現場諮詢'],[4,'opinions','讀者意見'],[5,'ndds','館際合作']]){if(!txt(child(svc[0],'tr')[idx]).includes(label))fail('Word參考諮詢列不符：'+label);setCell(svc[0],idx,2,fmt(p.service[key]))}
+ let outer=tables.filter(t=>child(t,'tr').length===11&&txt(t).includes('讀者服務統計')&&txt(t).includes('參考諮詢服務'));
+ if(outer.length!==1)fail('Word外層業務表定位失敗');
+ let rs=child(outer[0],'tr'),reader=child(rs[1],'tc').at(-1),consult=child(rs[3],'tc').at(-1);
+ if(!txt(rs[1]).includes('讀者服務統計')||!txt(rs[3]).includes('參考諮詢服務'))fail('Word業務區塊位置已變更');
+ let rp=child(reader,'p'),cp=child(consult,'p');
+ function updateParas(ps,start,end,value){if(start>=end||!ps[start]||!ps[end-1])fail('Word段落範圍不符');setText(ps[start],value);for(let k=start+1;k<end;k++)setText(ps[k],'')}
+ if(!txt(rp[14]).includes('入館人次')||!txt(rp[18]).includes('借閱人次')||!txt(rp[22]).includes('預約冊'))fail('Word流通分析段落結構不符');
+ updateParas(rp,15,18,p.text.entry);updateParas(rp,19,22,p.text.loan);
+ if(!txt(cp[9]).includes('檢討分析')||!txt(cp[11]).includes('執行效益'))fail('Word參考諮詢段落結構不符');
+ setText(cp[10],p.text.consult);setText(cp[12],p.text.benefit);
+ return new XMLSerializer().serializeToString(doc)
+}
+$('export').onclick=async()=>{try{if(!payload||!$('approved').checked)fail('請先完成審核');let zip=await JSZip.loadAsync(await payload.word.arrayBuffer());let f=zip.file('word/document.xml');if(!f)fail('Word 缺少 document.xml');let original=await f.async('string'),updated=patch(original,{...payload,text:{entry:$('entry').value,loan:$('loan').value,consult:$('consult').value,benefit:$('benefit').value}});zip.file('word/document.xml',updated);let out=await zip.generateAsync({type:'blob',compression:'DEFLATE'});let url=URL.createObjectURL(out),a=document.createElement('a');a.href=url;a.download=`${payload.y}年${payload.m}月_館務會議指定欄位填報_待驗收.docx`;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);$('status').innerHTML='<p class="ok">已產出 Word 測試檔。請開啟檢查頁面與表格排版後再使用。</p>'}catch(e){$('status').innerHTML='<p class="err">停止產出：'+e.message+'</p>'}};
+</script></body></html>
